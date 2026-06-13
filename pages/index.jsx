@@ -599,6 +599,43 @@ function StepEvaluation({ data, set, setNested }) {
   const pm2_used = parseFloat(data.pm2_median) || calcMedian
   const valeur = sdp && pm2_used ? Math.round(sdp * pm2_used / 1000) * 1000 : 0
 
+  const [dvfLoading, setDvfLoading] = useState(false)
+  const [dvfMsg, setDvfMsg] = useState(null)
+
+  // Recherche automatique des ventes comparables dans la base DVF (data.gouv)
+  const rechercherDVF = async () => {
+    setDvfLoading(true)
+    setDvfMsg(null)
+    try {
+      const res = await fetch('/api/dvf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          commune: data.commune,
+          code_postal: data.code_postal,
+          adresse_bien: data.adresse_bien,
+          type_bien: data.type_bien,
+          sdp: data.sdp,
+        }),
+      })
+      const out = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+      if (!res.ok) throw new Error(out.error || `Erreur ${res.status}`)
+
+      if (out.warning) { setDvfMsg({ type: 'warn', text: out.warning }); return }
+      if (!out.refs || out.refs.length === 0) {
+        setDvfMsg({ type: 'warn', text: `Aucune vente trouvée pour ${out.commune || data.commune}. Vérifiez la commune ou saisissez manuellement.` })
+        return
+      }
+      set('dvf_refs', out.refs)
+      set('periode_dvf', `${out.periode_mois || 24} mois (DVF data.gouv)`)
+      setDvfMsg({ type: 'ok', text: `${out.count} vente(s) importée(s) pour ${out.commune} (INSEE ${out.insee}) — médiane ${out.pm2_median.toLocaleString('fr-FR')} €/m². Décochez les valeurs aberrantes.` })
+    } catch (e) {
+      setDvfMsg({ type: 'err', text: e.message })
+    } finally {
+      setDvfLoading(false)
+    }
+  }
+
   const addRef = () => {
     set('dvf_refs', [...data.dvf_refs, { date:'', localisation:'', type:'', surface:'', valeur:'', pm2:'', retenu:true, statut:'Retenue' }])
   }
@@ -611,9 +648,28 @@ function StepEvaluation({ data, set, setNested }) {
   return (
     <div>
       <Alert type="info">
-        Saisissez les transactions DVF de la zone. Décochez les valeurs aberrantes.
-        Le prix médian et la valeur se recalculent automatiquement.
+        Saisissez les transactions DVF de la zone, ou importez-les automatiquement
+        depuis data.gouv. Décochez les valeurs aberrantes — le prix médian et la
+        valeur se recalculent automatiquement.
       </Alert>
+
+      <div style={{display:'flex',alignItems:'center',gap:10,marginTop:'.75rem',flexWrap:'wrap'}}>
+        <button className="btn btn-primary" style={{fontSize:13}}
+                onClick={rechercherDVF}
+                disabled={dvfLoading || !data.commune}>
+          {dvfLoading ? '⏳ Recherche en cours…' : '🔍 Rechercher les ventes DVF'}
+        </button>
+        <span style={{fontSize:11,color:'var(--muted, #888)'}}>
+          {data.commune ? `Commune : ${data.commune}` : 'Renseignez la commune à l’étape Identification'}
+        </span>
+      </div>
+      {dvfMsg && (
+        <div style={{marginTop:8}}>
+          <Alert type={dvfMsg.type === 'ok' ? 'ok' : dvfMsg.type === 'warn' ? 'warn' : 'err'}>
+            {dvfMsg.text}
+          </Alert>
+        </div>
+      )}
 
       <div className="sec-title" style={{marginTop:'.75rem'}}>Références DVF</div>
       <div className="tbl-wrap">
