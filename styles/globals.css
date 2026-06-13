@@ -302,3 +302,54 @@ body {
   animation: spin .6s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ─────────────────────────────────────────────────────────────
+   Responsive — tablettes & mobiles
+   ───────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Topbar compacte */
+  .topbar { padding: 0 1rem; height: 52px; }
+  .topbar-brand { font-size: 16px; }
+  .topbar-sub { display: none; }
+
+  /* Layout : la progression passe au-dessus de la carte */
+  .main { flex-direction: column; gap: 1rem; padding: 1rem .75rem 2.5rem; }
+
+  /* Stepper → bande horizontale de pastilles cliquables */
+  .stepper {
+    width: 100%;
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .stepper-title { width: 100%; margin-bottom: 0; }
+  .progress-bar  { width: 100%; margin-bottom: 2px; }
+  .step-item { padding: 4px; gap: 0; }
+  .step-item::after { display: none; }      /* masque les traits de liaison verticaux */
+  .step-label, .step-sub { display: none; } /* le titre courant est repris dans l'entête de carte */
+
+  /* Carte */
+  .card-header { padding: .9rem 1rem; gap: 10px; }
+  .card-header-title { font-size: 15px; }
+  .card-header-sub { display: none; }
+  .card-body { padding: 1.1rem 1rem; }
+  .card-footer { padding: .8rem 1rem; }
+  .card-footer > span { display: none; }    /* « Étape X sur Y » redondant avec l'entête */
+
+  /* Champs : 16px évite le zoom automatique iOS au focus */
+  .field input, .field select, .field textarea { font-size: 16px; }
+
+  /* Bloc valeur empilé */
+  .value-box { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .value-box-amount { font-size: 22px; }
+
+  /* Boutons plus faciles à toucher */
+  .btn { padding: 10px 16px; }
+}
+
+@media (max-width: 430px) {
+  .summary-grid { grid-template-columns: 1fr; }
+  .value-box-amount { font-size: 20px; }
+}
