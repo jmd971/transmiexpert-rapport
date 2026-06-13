@@ -1,15 +1,32 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import Head from 'next/head'
 
 // ─── Configuration des étapes ────────────────────────────────────────────────
 const STEPS = [
   { id: 'mission',     icon: '📋', title: 'Mission',        sub: 'Demandeur et dates' },
   { id: 'bien',        icon: '🏠', title: 'Identification',  sub: 'Adresse et cadastre' },
-  { id: 'description', icon: '📐', title: 'Description',    sub: 'Surfaces et composition' },
+  { id: 'description', icon: '📐', title: 'Description',    sub: 'Surfaces et vétusté' },
+  { id: 'photos',      icon: '📷', title: 'Photos',         sub: 'Reportage de visite' },
   { id: 'risques',     icon: '⚠️',  title: 'Risques',        sub: 'Naturels et diagnostics' },
   { id: 'evaluation',  icon: '📊', title: 'Évaluation',     sub: 'DVF et calcul de valeur' },
   { id: 'generation',  icon: '✅', title: 'Génération',     sub: 'Vérification et PDF' },
 ]
+
+// ─── Vétusté standard Guadeloupe ─────────────────────────────────────────────
+const VETUSTE_POSTES_DEFAUT = [
+  { poste: 'Structure (fondations, poteaux, plancher)', pct_cout: 30, duree_vie: 80 },
+  { poste: 'Toiture (charpente + couverture)',          pct_cout: 15, duree_vie: 25 },
+  { poste: 'Menuiseries (portes, fenêtres, volets)',    pct_cout: 10, duree_vie: 30 },
+  { poste: 'Électricité',                               pct_cout: 12, duree_vie: 25 },
+  { poste: 'Plomberie / sanitaires',                    pct_cout: 10, duree_vie: 30 },
+  { poste: 'Finitions (carrelage, peinture, enduits)',  pct_cout: 13, duree_vie: 20 },
+  { poste: 'Climatisation / VMC',                       pct_cout: 10, duree_vie: 15 },
+]
+
+function initVetustePostes(annee) {
+  const age = annee ? Math.max(0, new Date().getFullYear() - parseInt(annee)) : 0
+  return VETUSTE_POSTES_DEFAUT.map(p => ({ ...p, age_effectif: age }))
+}
 
 // ─── État initial ─────────────────────────────────────────────────────────────
 const initialData = {
@@ -20,7 +37,7 @@ const initialData = {
   demandeur_adresse: '',
   date_visite: '',
   date_rapport: new Date().toISOString().substring(0, 10),
-  objet_mission: 'Estimation en valeur vénale',
+  objet_mission: 'Estimation en valeur vénale — pleine propriété',
 
   // Bien
   type_bien: 'maison',
@@ -36,6 +53,14 @@ const initialData = {
   zonage_plu: '',
   assainissement: 'Collectif',
 
+  // Environnement & marché
+  env_distance_centre: '',
+  env_acces: '',
+  env_transports: '',
+  env_commerces: '',
+  marche_tendance: 'Stable',
+  marche_tension: 'Équilibrée',
+
   // Description
   sdp: '',
   annee_construction: '',
@@ -43,8 +68,26 @@ const initialData = {
   ascenseur: false,
   type_appart: 'F3',
   batiment: '',
-  etat_general: 'Bon état d\'usage',
+  etat_general: "Bon état d'usage",
+  etat_communs: 'Bon',
   distribution: ['', '', '', '', ''],
+
+  // Caractéristiques physiques par poste
+  carac_physiques: [
+    { poste: 'Structure / Fondations',     etat: 'Bon', notes: '' },
+    { poste: 'Toiture (couverture)',        etat: 'Bon', notes: '' },
+    { poste: 'Menuiseries extérieures',     etat: 'Bon', notes: '' },
+    { poste: 'Installations électriques',   etat: 'Bon', notes: '' },
+    { poste: 'Plomberie / sanitaires',      etat: 'Bon', notes: '' },
+    { poste: 'Revêtements / finitions',     etat: 'Bon', notes: '' },
+    { poste: 'Climatisation / ventilation', etat: 'Bon', notes: '' },
+  ],
+
+  // Vétusté décomposée
+  vetuste_postes: [],
+
+  // Photos
+  photos: [],
 
   // Risques
   zone_sismique: 'V',
@@ -69,8 +112,11 @@ const initialData = {
   vente_anterieure: null,
   poids_comparaison: 55,
   poids_sol_construction: 45,
+  valeur_locative_mensuelle: '',
 
   // Conclusion
+  duree_validite: '6 mois à compter de la date du rapport',
+  decote_liquidation: 15,
   valeur_retenue_texte: '',
 }
 
@@ -132,7 +178,6 @@ export default function ExpertForm() {
     }
   }
 
-  // Calculer la valeur estimée pour la prévisualisation
   const computeValue = () => {
     const retained = data.dvf_refs.filter(r => r.retenu && r.pm2)
     const pm2s = retained.map(r => parseFloat(r.pm2)).filter(v => v > 0).sort((a,b) => a-b)
@@ -141,18 +186,26 @@ export default function ExpertForm() {
     return sdp && median ? Math.round(sdp * median / 1000) * 1000 : 0
   }
 
-  // Générer le PDF
   const generer = async () => {
     setLoading(true)
     setError(null)
     setSuccess(false)
 
-    // Construire le texte de valeur
     const valeur = computeValue()
+
+    // Vétusté globale depuis le tableau décomposé
+    const postes = data.vetuste_postes || []
+    const vetusteGlobale = postes.length
+      ? postes.reduce((acc, p) => {
+          const v = Math.min(parseFloat(p.age_effectif||0) / (parseFloat(p.duree_vie||1)||1), 1)
+          return acc + parseFloat(p.pct_cout||0) * v
+        }, 0)
+      : parseFloat(data.vetuste_taux) || 20
+
     const params = {
       ...data,
       valeur_retenue_texte: data.valeur_retenue_texte ||
-        (valeur ? `${valeur.toLocaleString('fr-FR')}\u202f€` : ''),
+        (valeur ? `${valeur.toLocaleString('fr-FR')} €` : ''),
       distribution: data.distribution.filter(Boolean),
       dvf_refs: data.dvf_refs.filter(r => r.date || r.localisation).map(r => ({
         ...r,
@@ -160,9 +213,16 @@ export default function ExpertForm() {
         valeur:  parseFloat(r.valeur)  || 0,
         pm2:     parseFloat(r.pm2)     || 0,
       })),
-      pm2_median: parseFloat(data.pm2_median) || 0,
-      terrain_m2: parseFloat(data.terrain_m2) || 0,
-      sdp:        parseFloat(data.sdp)        || 0,
+      pm2_median:    parseFloat(data.pm2_median) || 0,
+      terrain_m2:    parseFloat(data.terrain_m2) || 0,
+      sdp:           parseFloat(data.sdp)        || 0,
+      vetuste_taux:  parseFloat(vetusteGlobale.toFixed(1)),
+      vetuste_postes: postes.map(p => ({
+        ...p,
+        age_effectif: parseFloat(p.age_effectif) || 0,
+        duree_vie:    parseFloat(p.duree_vie)    || 1,
+        pct_cout:     parseFloat(p.pct_cout)     || 0,
+      })),
     }
 
     try {
@@ -171,13 +231,10 @@ export default function ExpertForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
       })
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
         throw new Error(err.error || `Erreur ${res.status}`)
       }
-
-      // Télécharger le PDF
       const blob = await res.blob()
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
@@ -188,7 +245,6 @@ export default function ExpertForm() {
       a.click()
       URL.revokeObjectURL(url)
       setSuccess(true)
-
     } catch (e) {
       setError(e.message)
     } finally {
@@ -196,15 +252,15 @@ export default function ExpertForm() {
     }
   }
 
-  // ─── Rendu des étapes ───────────────────────────────────────────────────────
   const renderStep = () => {
     switch (step) {
       case 0: return <StepMission data={data} set={set} />
       case 1: return <StepBien data={data} set={set} />
-      case 2: return <StepDescription data={data} set={set} setNested={setNested} />
-      case 3: return <StepRisques data={data} set={set} />
-      case 4: return <StepEvaluation data={data} set={set} setNested={setNested} />
-      case 5: return <StepGeneration data={data} set={set} computeValue={computeValue}
+      case 2: return <StepDescription data={data} set={set} />
+      case 3: return <StepPhotos data={data} set={set} />
+      case 4: return <StepRisques data={data} set={set} />
+      case 5: return <StepEvaluation data={data} set={set} setNested={setNested} />
+      case 6: return <StepGeneration data={data} set={set} computeValue={computeValue}
                        generer={generer} loading={loading} error={error} success={success} />
     }
   }
@@ -219,23 +275,17 @@ export default function ExpertForm() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 
-      {/* Topbar */}
       <div className="topbar">
         <div>
           <div className="topbar-brand">SAGETRIM <span>·</span> ExpertForm</div>
           <div className="topbar-sub">Rapport d'expertise immobilière</div>
         </div>
-        <div style={{display:'flex',gap:8,alignItems:'center'}}>
-          <span style={{fontSize:11,color:'rgba(255,255,255,.4)'}}>
-            {data.ref || 'Nouveau dossier'}
-          </span>
-        </div>
+        <span style={{fontSize:11,color:'rgba(255,255,255,.4)'}}>
+          {data.ref || 'Nouveau dossier'}
+        </span>
       </div>
 
-      {/* Layout */}
       <div className="main">
-
-        {/* Stepper */}
         <nav className="stepper">
           <div className="stepper-title">Progression</div>
           <div className="progress-bar">
@@ -256,7 +306,6 @@ export default function ExpertForm() {
           })}
         </nav>
 
-        {/* Card */}
         <div className="card">
           <div className="card-header">
             <div className="card-header-icon">{STEPS[step].icon}</div>
@@ -276,11 +325,11 @@ export default function ExpertForm() {
             <span style={{fontSize:11,color:'var(--muted)'}}>
               Étape {step + 1} sur {STEPS.length}
             </span>
-            {step < STEPS.length - 1 ? (
+            {step < STEPS.length - 1 && (
               <button className="btn btn-primary" onClick={() => nav(1)}>
                 Suivant →
               </button>
-            ) : null}
+            )}
           </div>
         </div>
       </div>
@@ -335,11 +384,19 @@ function StepMission({ data, set }) {
       <div className="sec-title">Objet de la mission</div>
       <Field label="Mission">
         <select value={data.objet_mission} onChange={e => set('objet_mission', e.target.value)}>
-          <option>Estimation en valeur vénale</option>
-          <option>Estimation en valeur locative</option>
-          <option>Estimation en valeur d'assurance</option>
-          <option>Estimation en valeur d'apport</option>
-          <option>Estimation en valeur de cession de parts de SCI</option>
+          <optgroup label="Valeur vénale">
+            <option>Estimation en valeur vénale — pleine propriété</option>
+            <option>Estimation pour partage successoral / donation-partage</option>
+            <option>Estimation pour garantie de passif</option>
+            <option>Estimation en valeur d'apport (SCI / société)</option>
+            <option>Estimation en valeur de cession de parts de SCI</option>
+            <option>Expertise contradictoire</option>
+          </optgroup>
+          <optgroup label="Autres bases">
+            <option>Estimation en valeur locative de marché</option>
+            <option>Estimation en valeur vénale et locative</option>
+            <option>Estimation en valeur d'assurance (reconstruction)</option>
+          </optgroup>
         </select>
       </Field>
       <Alert type="info">
@@ -414,6 +471,52 @@ function StepBien({ data, set }) {
                placeholder="Zone UB — Résidentielle périphérique (PLU …)" />
       </Field>
 
+      <div className="sep" />
+      <div className="sec-title">Environnement immédiat</div>
+      <div className="grid-2">
+        <Field label="Distance centre-ville / bourg">
+          <input value={data.env_distance_centre}
+                 onChange={e => set('env_distance_centre', e.target.value)}
+                 placeholder="1,5 km du centre-bourg" />
+        </Field>
+        <Field label="Accès / voiries">
+          <input value={data.env_acces}
+                 onChange={e => set('env_acces', e.target.value)}
+                 placeholder="RN1, voie communale bitumée…" />
+        </Field>
+        <Field label="Transports en commun">
+          <input value={data.env_transports}
+                 onChange={e => set('env_transports', e.target.value)}
+                 placeholder="Bus Karulis — arrêt à 200 m" />
+        </Field>
+        <Field label="Commerces / écoles / services">
+          <input value={data.env_commerces}
+                 onChange={e => set('env_commerces', e.target.value)}
+                 placeholder="Carrefour à 800 m, école primaire à 400 m" />
+        </Field>
+      </div>
+
+      <div className="sep" />
+      <div className="sec-title">Marché immobilier local</div>
+      <div className="grid-2">
+        <Field label="Tendance de marché" hint="Au moment de l'expertise">
+          <select value={data.marche_tendance} onChange={e => set('marche_tendance', e.target.value)}>
+            <option>Stable</option>
+            <option>Haussier — demande supérieure à l'offre</option>
+            <option>Baissier — offre supérieure à la demande</option>
+            <option>Atone — peu de transactions</option>
+          </select>
+        </Field>
+        <Field label="Tension offre / demande">
+          <select value={data.marche_tension} onChange={e => set('marche_tension', e.target.value)}>
+            <option>Équilibrée</option>
+            <option>Forte demande — pénurie d'offre</option>
+            <option>Offre abondante — demande faible</option>
+            <option>Marché spéculatif</option>
+          </select>
+        </Field>
+      </div>
+
       {data.type_bien === 'appartement' && (
         <>
           <div className="sep" />
@@ -447,7 +550,34 @@ function StepBien({ data, set }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // ÉTAPE 3 — DESCRIPTION
 // ═══════════════════════════════════════════════════════════════════════════════
-function StepDescription({ data, set, setNested }) {
+function StepDescription({ data, set }) {
+  const annee = parseInt(data.annee_construction) || 0
+  const ageGlobal = annee ? new Date().getFullYear() - annee : 0
+
+  const handleAnneeChange = (val) => {
+    set('annee_construction', val)
+    const a = parseInt(val)
+    if (a > 1800 && a <= new Date().getFullYear()) {
+      if (!data.vetuste_postes || data.vetuste_postes.length === 0) {
+        set('vetuste_postes', initVetustePostes(a))
+      }
+    }
+  }
+
+  const postes = data.vetuste_postes || []
+  const vetusteGlobale = postes.reduce((acc, p) => {
+    const v = Math.min(parseFloat(p.age_effectif||0) / (parseFloat(p.duree_vie||1)||1), 1)
+    return acc + parseFloat(p.pct_cout||0) * v
+  }, 0)
+
+  const updatePoste = (i, field, val) => {
+    set('vetuste_postes', postes.map((p, j) => j === i ? { ...p, [field]: val } : p))
+  }
+
+  const updateCarac = (i, field, val) => {
+    set('carac_physiques', (data.carac_physiques||[]).map((c, j) => j === i ? { ...c, [field]: val } : c))
+  }
+
   return (
     <div>
       <div className="sec-title">Surfaces</div>
@@ -462,14 +592,16 @@ function StepDescription({ data, set, setNested }) {
         </Field>
         <Field label="Année de construction">
           <input type="number" value={data.annee_construction}
-                 onChange={e => set('annee_construction', e.target.value)}
+                 onChange={e => handleAnneeChange(e.target.value)}
                  placeholder="1967, 1985…" />
         </Field>
-        <Field label="Type appartement" style={{display: data.type_bien==='appartement'?'':'none'}}>
-          <select value={data.type_appart} onChange={e => set('type_appart', e.target.value)}>
-            {['F1','F2','F3','F4','F5','F6','Studio'].map(t => <option key={t}>{t}</option>)}
-          </select>
-        </Field>
+        {data.type_bien === 'appartement' && (
+          <Field label="Type appartement">
+            <select value={data.type_appart} onChange={e => set('type_appart', e.target.value)}>
+              {['F1','F2','F3','F4','F5','F6','Studio'].map(t => <option key={t}>{t}</option>)}
+            </select>
+          </Field>
+        )}
       </div>
 
       {data.type_bien !== 'terrain' && (
@@ -483,16 +615,14 @@ function StepDescription({ data, set, setNested }) {
             <div key={i} style={{display:'flex',gap:8,marginBottom:6}}>
               <input
                 value={item}
-                onChange={e => setNested('distribution', i, null, null) ||
-                  set('distribution', data.distribution.map((d,j) => j===i ? e.target.value : d))}
+                onChange={e => set('distribution', data.distribution.map((d,j) => j===i ? e.target.value : d))}
                 placeholder={`Pièce / élément ${i+1} (ex. 2 chambres, 1 cuisine, terrasse…)`}
                 style={{padding:'7px 10px',border:'1px solid var(--border)',
                         borderRadius:'var(--r)',fontSize:13,flex:1}}
               />
             </div>
           ))}
-          <button className="btn btn-secondary"
-                  style={{fontSize:12,marginTop:4}}
+          <button className="btn btn-secondary" style={{fontSize:12,marginTop:4}}
                   onClick={() => set('distribution', [...data.distribution, ''])}>
             + Ajouter une ligne
           </button>
@@ -510,7 +640,7 @@ function StepDescription({ data, set, setNested }) {
             </Field>
             {data.type_bien === 'appartement' && (
               <Field label="Parties communes">
-                <select value={data.etat_communs || 'Bon'} onChange={e => set('etat_communs', e.target.value)}>
+                <select value={data.etat_communs} onChange={e => set('etat_communs', e.target.value)}>
                   <option>Excellent</option>
                   <option>Bon</option>
                   <option>Moyen</option>
@@ -519,14 +649,205 @@ function StepDescription({ data, set, setNested }) {
               </Field>
             )}
           </div>
+
+          <div className="sep" />
+          <div className="sec-title">Caractéristiques par poste</div>
+          <Alert type="info">
+            État constaté lors de la visite — apparaît dans le rapport (§ Description des biens).
+          </Alert>
+          <div className="vet-table-wrap" style={{marginTop:'.6rem'}}>
+            <table className="vet-tbl">
+              <thead>
+                <tr>
+                  <th style={{width:'35%'}}>Poste</th>
+                  <th style={{width:'20%'}}>État constaté</th>
+                  <th>Observations</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.carac_physiques||[]).map((c, i) => (
+                  <tr key={i}>
+                    <td className="vet-poste">{c.poste}</td>
+                    <td>
+                      <select value={c.etat} onChange={e => updateCarac(i, 'etat', e.target.value)}
+                              style={{fontSize:11,padding:'3px 5px',border:'1px solid var(--border)',borderRadius:4,width:'100%'}}>
+                        <option>Neuf / récent</option>
+                        <option>Bon</option>
+                        <option>Moyen</option>
+                        <option>Mauvais</option>
+                        <option>Rénové</option>
+                        <option>Non visible</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input value={c.notes} onChange={e => updateCarac(i, 'notes', e.target.value)}
+                             placeholder="Ex. toiture refaite 2018, clim reversible…"
+                             style={{width:'100%',fontSize:11,padding:'3px 6px',border:'1px solid var(--border)',borderRadius:4}} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
+      )}
+
+      {/* Vétusté décomposée — maison uniquement */}
+      {data.type_bien === 'maison' && postes.length > 0 && (
+        <>
+          <div className="sep" />
+          <div className="sec-title">Vétusté par poste</div>
+          <Alert type="info">
+            Modifiez l'âge effectif si un élément a été rénové (ex. toiture refaite en 2018 → 8 ans).
+            La vétusté globale se recalcule automatiquement.
+          </Alert>
+          <div className="vet-table-wrap" style={{marginTop:'.6rem'}}>
+            <table className="vet-tbl">
+              <thead>
+                <tr>
+                  <th>Poste</th><th>% coût</th><th>Âge eff.</th>
+                  <th>Durée vie</th><th>Vét.</th><th>Contrib.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {postes.map((p, i) => {
+                  const vet = Math.min(parseFloat(p.age_effectif||0) / (parseFloat(p.duree_vie||1)||1), 1)
+                  return (
+                    <tr key={i}>
+                      <td className="vet-poste">{p.poste}</td>
+                      <td style={{textAlign:'center',color:'var(--muted)'}}>{p.pct_cout} %</td>
+                      <td>
+                        <input type="number" min="0" max="150" value={p.age_effectif}
+                               onChange={e => updatePoste(i, 'age_effectif', e.target.value)}
+                               className="vet-input" />
+                      </td>
+                      <td>
+                        <input type="number" min="1" max="200" value={p.duree_vie}
+                               onChange={e => updatePoste(i, 'duree_vie', e.target.value)}
+                               className="vet-input" />
+                      </td>
+                      <td style={{textAlign:'center'}}>{(vet*100).toFixed(0)} %</td>
+                      <td style={{textAlign:'center',fontWeight:600,color:'var(--navy)'}}>
+                        {(parseFloat(p.pct_cout||0)*vet).toFixed(1)} %
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="vet-total">
+                  <td colSpan="5">Vétusté globale pondérée</td>
+                  <td style={{textAlign:'center'}}>{vetusteGlobale.toFixed(1)} %</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <button className="btn btn-secondary" style={{fontSize:11,marginTop:6}}
+                  onClick={() => set('vetuste_postes', initVetustePostes(annee))}>
+            Réinitialiser (âge = {ageGlobal} ans)
+          </button>
+        </>
+      )}
+      {data.type_bien === 'maison' && annee > 0 && postes.length === 0 && (
+        <div style={{marginTop:'.75rem'}}>
+          <button className="btn btn-secondary" onClick={() => set('vetuste_postes', initVetustePostes(annee))}>
+            Initialiser le tableau de vétusté
+          </button>
+        </div>
       )}
     </div>
   )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ÉTAPE 4 — RISQUES
+// ÉTAPE 4 — PHOTOS
+// ═══════════════════════════════════════════════════════════════════════════════
+function StepPhotos({ data, set }) {
+  const inputRef = useRef()
+
+  const handleFiles = async (files) => {
+    const MAX_DIM = 1400
+    const QUALITY = 0.78
+    const processed = await Promise.all(Array.from(files).map(f => new Promise(resolve => {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        const img = new window.Image()
+        img.onload = () => {
+          let { width: w, height: h } = img
+          if (w > MAX_DIM || h > MAX_DIM) {
+            if (w >= h) { h = Math.round(h * MAX_DIM / w); w = MAX_DIM }
+            else        { w = Math.round(w * MAX_DIM / h); h = MAX_DIM }
+          }
+          const canvas = document.createElement('canvas')
+          canvas.width = w; canvas.height = h
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+          resolve({ name: f.name, data: canvas.toDataURL('image/jpeg', QUALITY), caption: '' })
+        }
+        img.src = ev.target.result
+      }
+      reader.readAsDataURL(f)
+    })))
+    set('photos', [...data.photos, ...processed])
+  }
+
+  return (
+    <div>
+      <Alert type="info">
+        Ajoutez les photos prises lors de la visite. Elles s'intègrent automatiquement
+        en Annexe VII du rapport, 2 par ligne avec légende.
+      </Alert>
+
+      <div className="photo-drop-zone"
+           onClick={() => inputRef.current?.click()}
+           onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer.files) }}
+           onDragOver={e => e.preventDefault()}>
+        <div className="photo-drop-icon">📷</div>
+        <div className="photo-drop-label">Cliquez ou déposez vos photos ici</div>
+        <div className="photo-drop-sub">JPEG · PNG · HEIC — redimensionnées automatiquement</div>
+        <input ref={inputRef} type="file" multiple accept="image/*"
+               style={{display:'none'}} onChange={e => handleFiles(e.target.files)} />
+      </div>
+
+      {data.photos.length > 0 && (
+        <>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',margin:'.75rem 0 .4rem'}}>
+            <div className="sec-title" style={{margin:0}}>
+              {data.photos.length} photo{data.photos.length > 1 ? 's' : ''}
+            </div>
+            <button className="btn btn-secondary" style={{fontSize:11}}
+                    onClick={() => set('photos', [])}>Tout supprimer</button>
+          </div>
+          <div className="photo-grid">
+            {data.photos.map((photo, i) => (
+              <div key={i} className="photo-card">
+                <div className="photo-card-img-wrap">
+                  <img src={photo.data} alt={photo.name} className="photo-card-img" />
+                  <button className="photo-del"
+                          onClick={() => set('photos', data.photos.filter((_,j) => j!==i))}>×</button>
+                  <div className="photo-num">{i + 1}</div>
+                </div>
+                <input className="photo-caption-input" value={photo.caption}
+                       onChange={e => set('photos', data.photos.map((p,j) => j===i ? {...p,caption:e.target.value} : p))}
+                       placeholder="Légende (Façade, Séjour, Toiture…)" />
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:11,color:'var(--muted)',marginTop:6,textAlign:'right'}}>
+            Taille estimée : {(data.photos.reduce((a,p) => a+(p.data?.length||0),0)/1024/1024*0.75).toFixed(1)} Mo
+          </div>
+        </>
+      )}
+      {data.photos.length === 0 && (
+        <div style={{textAlign:'center',color:'var(--muted)',fontSize:12,padding:'1rem 0'}}>
+          Aucune photo — le rapport mentionnera la visite sans reportage photographique joint.
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ÉTAPE 5 — RISQUES
 // ═══════════════════════════════════════════════════════════════════════════════
 function StepRisques({ data, set }) {
   return (
@@ -536,8 +857,7 @@ function StepRisques({ data, set }) {
         <div style={{border:'1px solid var(--border)',borderRadius:'var(--r)',padding:'10px 12px'}}>
           <div style={{fontSize:11,fontWeight:600,color:'var(--navy)',marginBottom:6}}>Zone sismique</div>
           <select value={data.zone_sismique} onChange={e => set('zone_sismique', e.target.value)}
-                  style={{width:'100%',padding:'6px 8px',border:'1px solid var(--border)',
-                          borderRadius:'var(--r)',fontSize:13}}>
+                  style={{width:'100%',padding:'6px 8px',border:'1px solid var(--border)',borderRadius:'var(--r)',fontSize:13}}>
             {['I','II','III','IV','V'].map(z => (
               <option key={z} value={z}>{z}{z==='V'?' — Maximale (Guadeloupe)':''}</option>
             ))}
@@ -552,13 +872,11 @@ function StepRisques({ data, set }) {
           <div style={{fontSize:11,fontWeight:600,color:'var(--navy)',marginBottom:6}}>Termites</div>
           <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:'pointer'}}>
             <input type="radio" name="termites" checked={data.termites_zone}
-                   onChange={() => set('termites_zone', true)} />
-            Zone contaminée
+                   onChange={() => set('termites_zone', true)} /> Zone contaminée
           </label>
           <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:'pointer',marginTop:4}}>
             <input type="radio" name="termites" checked={!data.termites_zone}
-                   onChange={() => set('termites_zone', false)} />
-            Hors zone
+                   onChange={() => set('termites_zone', false)} /> Hors zone
           </label>
         </div>
       </div>
@@ -575,9 +893,9 @@ function StepRisques({ data, set }) {
       </Alert>
       <div style={{marginTop:'.75rem'}}>
         {[
-          ['diag_amiante',  'Diagnostic amiante',          'Obligatoire si construction avant 1997'],
-          ['diag_termites', 'Diagnostic termites',         'Obligatoire en zone contaminée'],
-          ['diag_elec',     'Diagnostic électricité',      'Obligatoire si installation > 15 ans'],
+          ['diag_amiante',  'Diagnostic amiante',           'Obligatoire si construction avant 1997'],
+          ['diag_termites', 'Diagnostic termites',          'Obligatoire en zone contaminée'],
+          ['diag_elec',     'Diagnostic électricité',       'Obligatoire si installation > 15 ans'],
           ['diag_dpe',      'DPE — Performance énergétique','Obligatoire pour toute mutation'],
         ].map(([key, label, sub]) => (
           <Toggle key={key} label={label} sub={sub}
@@ -589,7 +907,7 @@ function StepRisques({ data, set }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ÉTAPE 5 — ÉVALUATION
+// ÉTAPE 6 — ÉVALUATION
 // ═══════════════════════════════════════════════════════════════════════════════
 function StepEvaluation({ data, set, setNested }) {
   const retained = data.dvf_refs.filter(r => r.retenu && r.pm2)
@@ -602,7 +920,6 @@ function StepEvaluation({ data, set, setNested }) {
   const [dvfLoading, setDvfLoading] = useState(false)
   const [dvfMsg, setDvfMsg] = useState(null)
 
-  // Recherche automatique des ventes comparables dans la base DVF (data.gouv)
   const rechercherDVF = async () => {
     setDvfLoading(true)
     setDvfMsg(null)
@@ -620,7 +937,6 @@ function StepEvaluation({ data, set, setNested }) {
       })
       const out = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
       if (!res.ok) throw new Error(out.error || `Erreur ${res.status}`)
-
       if (out.warning) { setDvfMsg({ type: 'warn', text: out.warning }); return }
       if (!out.refs || out.refs.length === 0) {
         setDvfMsg({ type: 'warn', text: `Aucune vente trouvée pour ${out.commune || data.commune}. Vérifiez la commune ou saisissez manuellement.` })
@@ -628,7 +944,7 @@ function StepEvaluation({ data, set, setNested }) {
       }
       set('dvf_refs', out.refs)
       set('periode_dvf', `${out.periode_mois || 24} mois (DVF data.gouv)`)
-      setDvfMsg({ type: 'ok', text: `${out.count} vente(s) importée(s) pour ${out.commune} (INSEE ${out.insee}) — médiane ${out.pm2_median.toLocaleString('fr-FR')} €/m². Décochez les valeurs aberrantes.` })
+      setDvfMsg({ type: 'ok', text: `${out.count} vente(s) importée(s) — ${out.commune} — médiane ${out.pm2_median.toLocaleString('fr-FR')} €/m²` })
     } catch (e) {
       setDvfMsg({ type: 'err', text: e.message })
     } finally {
@@ -636,38 +952,32 @@ function StepEvaluation({ data, set, setNested }) {
     }
   }
 
-  const addRef = () => {
-    set('dvf_refs', [...data.dvf_refs, { date:'', localisation:'', type:'', surface:'', valeur:'', pm2:'', retenu:true, statut:'Retenue' }])
-  }
-
-  const toggleRef = (i, checked) => {
-    const refs = data.dvf_refs.map((r,j) => j===i ? {...r, retenu:checked} : r)
-    set('dvf_refs', refs)
-  }
-
   return (
     <div>
       <Alert type="info">
-        Saisissez les transactions DVF de la zone, ou importez-les automatiquement
-        depuis data.gouv. Décochez les valeurs aberrantes — le prix médian et la
-        valeur se recalculent automatiquement.
+        Importez les ventes comparables depuis data.gouv ou saisissez-les manuellement.
+        Décochez les valeurs aberrantes — médiane et valeur se recalculent automatiquement.
+        La Charte recommande 5 références minimum.
       </Alert>
+      {retained.length > 0 && retained.length < 5 && (
+        <Alert type="warn">
+          {retained.length} référence{retained.length>1?'s':''} retenue{retained.length>1?'s':''} —
+          5 minimum recommandées. Élargissez la zone ou la période DVF.
+        </Alert>
+      )}
 
       <div style={{display:'flex',alignItems:'center',gap:10,marginTop:'.75rem',flexWrap:'wrap'}}>
         <button className="btn btn-primary" style={{fontSize:13}}
-                onClick={rechercherDVF}
-                disabled={dvfLoading || !data.commune}>
+                onClick={rechercherDVF} disabled={dvfLoading || !data.commune}>
           {dvfLoading ? '⏳ Recherche en cours…' : '🔍 Rechercher les ventes DVF'}
         </button>
-        <span style={{fontSize:11,color:'var(--muted, #888)'}}>
-          {data.commune ? `Commune : ${data.commune}` : 'Renseignez la commune à l’étape Identification'}
+        <span style={{fontSize:11,color:'var(--muted)'}}>
+          {data.commune ? `Commune : ${data.commune}` : 'Renseignez la commune (étape Identification)'}
         </span>
       </div>
       {dvfMsg && (
         <div style={{marginTop:8}}>
-          <Alert type={dvfMsg.type === 'ok' ? 'ok' : dvfMsg.type === 'warn' ? 'warn' : 'err'}>
-            {dvfMsg.text}
-          </Alert>
+          <Alert type={dvfMsg.type}>{dvfMsg.text}</Alert>
         </div>
       )}
 
@@ -685,14 +995,17 @@ function StepEvaluation({ data, set, setNested }) {
               <tr key={i} className={!r.retenu ? 'excl' : ''}>
                 <td>
                   <input type="checkbox" checked={r.retenu}
-                         onChange={e => toggleRef(i, e.target.checked)} />
+                         onChange={e => {
+                           const refs = data.dvf_refs.map((x,j) => j===i ? {...x,retenu:e.target.checked} : x)
+                           set('dvf_refs', refs)
+                         }} />
                 </td>
                 {['date','localisation','type','surface','valeur','pm2'].map(f => (
                   <td key={f}>
                     <input value={r[f]} onChange={e => setNested('dvf_refs', i, f, e.target.value)}
                            style={{border:'1px solid var(--border)',borderRadius:4,
                                    padding:'3px 6px',fontSize:11,width:'100%',
-                                   textDecoration: !r.retenu?'line-through':'none'}} />
+                                   textDecoration:!r.retenu?'line-through':'none'}} />
                   </td>
                 ))}
               </tr>
@@ -700,7 +1013,8 @@ function StepEvaluation({ data, set, setNested }) {
           </tbody>
         </table>
       </div>
-      <button className="btn btn-secondary" style={{fontSize:12,marginTop:6}} onClick={addRef}>
+      <button className="btn btn-secondary" style={{fontSize:12,marginTop:6}}
+              onClick={() => set('dvf_refs', [...data.dvf_refs, {date:'',localisation:'',type:'',surface:'',valeur:'',pm2:'',retenu:true,statut:'Retenue'}])}>
         + Ajouter une référence
       </button>
 
@@ -727,25 +1041,49 @@ function StepEvaluation({ data, set, setNested }) {
       <div className="sep" />
       <div className="sec-title">Paramètres de calcul</div>
       <div className="grid-3">
-        <Field label="Prix médian retenu (€/m²)"
-               hint="Laisser vide = médiane auto">
+        <Field label="Prix médian retenu (€/m²)" hint="Laisser vide = médiane auto">
           <input type="number" value={data.pm2_median}
                  onChange={e => set('pm2_median', e.target.value)}
                  placeholder={calcMedian || '1 176'} />
         </Field>
         {data.type_bien !== 'appartement' && (
           <>
-            <Field label="Coût reconstruction (€/m² SDP)"
-                   hint="Indice BT01 Guadeloupe 2026">
+            <Field label="Coût reconstruction (€/m² SDP)" hint="Indice BT01 Guadeloupe 2026">
               <input type="number" value={data.cout_construction_m2}
                      onChange={e => set('cout_construction_m2', e.target.value)} />
             </Field>
-            <Field label="Vétusté pondérée (%)">
+            <Field label="Vétusté pondérée (%)" hint="Auto-calculée si tableau renseigné (étape 3)">
               <input type="number" value={data.vetuste_taux}
                      onChange={e => set('vetuste_taux', e.target.value)} />
             </Field>
           </>
         )}
+      </div>
+
+      <div className="sep" />
+      <div className="sec-title">Valeur locative de marché</div>
+      <Alert type="info">
+        Facultatif — calcule le taux de capitalisation brut pour valider la cohérence
+        de la valeur vénale. Marché Guadeloupe : 5–8 % brut typique.
+      </Alert>
+      <div className="grid-2" style={{marginTop:'.6rem'}}>
+        <Field label="Loyer mensuel de marché (€/mois)" hint="Hors charges">
+          <input type="number" value={data.valeur_locative_mensuelle}
+                 onChange={e => set('valeur_locative_mensuelle', e.target.value)}
+                 placeholder="Ex. : 750" />
+        </Field>
+        {valeur > 0 && parseFloat(data.valeur_locative_mensuelle) > 0 && (() => {
+          const tc = (parseFloat(data.valeur_locative_mensuelle)*12/valeur*100)
+          return (
+            <div className="stat-card" style={{alignSelf:'flex-end'}}>
+              <div className="stat-l">Taux de capitalisation brut</div>
+              <div className="stat-v" style={{fontSize:18,color:tc<4.5||tc>9?'var(--alert)':'var(--success)'}}>
+                {tc.toFixed(1)} %
+              </div>
+              <div className="stat-s">Cible marché GP : 5–8 %</div>
+            </div>
+          )
+        })()}
       </div>
 
       {valeur > 0 && (
@@ -754,7 +1092,7 @@ function StepEvaluation({ data, set, setNested }) {
             <div className="value-box-label">VALEUR ESTIMÉE</div>
             <div className="value-box-amount">{valeur.toLocaleString('fr-FR')} €</div>
             <div className="value-box-range">
-              {Math.round(valeur*0.93/1000)*1000} — {Math.round(valeur*1.05/1000)*1000} €
+              {(Math.round(valeur*0.93/1000)*1000).toLocaleString('fr-FR')} — {(Math.round(valeur*1.05/1000)*1000).toLocaleString('fr-FR')} €
             </div>
           </div>
           <div style={{textAlign:'right',fontSize:11,color:'rgba(255,255,255,.45)'}}>
@@ -768,7 +1106,7 @@ function StepEvaluation({ data, set, setNested }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ÉTAPE 6 — GÉNÉRATION
+// ÉTAPE 7 — GÉNÉRATION
 // ═══════════════════════════════════════════════════════════════════════════════
 function StepGeneration({ data, set, computeValue, generer, loading, error, success }) {
   const valeur = computeValue()
@@ -777,83 +1115,97 @@ function StepGeneration({ data, set, computeValue, generer, loading, error, succ
     ['diag_elec','Électricité'],['diag_dpe','DPE'],
   ].filter(([k]) => !data[k]).map(([,l]) => l)
 
+  const decote = parseFloat(data.decote_liquidation) || 15
+  const valLiq = valeur ? Math.round(valeur*(1-decote/100)/1000)*1000 : 0
+  const locMens = parseFloat(data.valeur_locative_mensuelle) || 0
+  const tauxCapi = valeur && locMens ? (locMens*12/valeur*100).toFixed(1) : null
+
   return (
     <div>
-      {success ? (
-        <Alert type="ok">
-          ✓ Rapport généré avec succès ! Le PDF a été téléchargé.
-        </Alert>
-      ) : null}
-
-      {error ? (
-        <Alert type="err">
-          Erreur de génération : {error}
-        </Alert>
-      ) : null}
+      {success && <Alert type="ok">✓ Rapport généré avec succès ! Le PDF a été téléchargé.</Alert>}
+      {error   && <Alert type="err">Erreur de génération : {error}</Alert>}
 
       <div className="sec-title">Récapitulatif du dossier</div>
       <div className="summary-grid">
-        <div className="summary-item">
-          <div className="summary-item-label">Référence</div>
-          <div className="summary-item-value">{data.ref || '—'}</div>
-        </div>
-        <div className="summary-item">
-          <div className="summary-item-label">Date rapport</div>
-          <div className="summary-item-value">{data.date_rapport || '—'}</div>
-        </div>
-        <div className="summary-item">
-          <div className="summary-item-label">Demandeur</div>
-          <div className="summary-item-value">{data.demandeur_nom || '—'}</div>
-        </div>
-        <div className="summary-item">
-          <div className="summary-item-label">Bien</div>
-          <div className="summary-item-value">{data.commune || data.adresse_bien || '—'}</div>
-        </div>
-        <div className="summary-item">
-          <div className="summary-item-label">SDP</div>
-          <div className="summary-item-value">
-            {data.sdp ? `${data.sdp} m²` : <span style={{color:'var(--alert)'}}>⚠ Non renseignée</span>}
+        {[
+          ['Référence',       data.ref],
+          ['Date rapport',    data.date_rapport],
+          ['Demandeur',       data.demandeur_nom],
+          ['Bien',            data.commune || data.adresse_bien],
+          ['SDP',             data.sdp ? `${data.sdp} m²` : null],
+          ['Réf. DVF',        `${data.dvf_refs.filter(r=>r.retenu).length} / ${data.dvf_refs.length}`],
+          ['Photos',          `${data.photos.length} photo${data.photos.length!==1?'s':''}`],
+        ].map(([label, val]) => (
+          <div key={label} className="summary-item">
+            <div className="summary-item-label">{label}</div>
+            <div className="summary-item-value">
+              {val || <span style={{color:'var(--alert)'}}>⚠ Non renseigné</span>}
+            </div>
           </div>
-        </div>
-        <div className="summary-item">
-          <div className="summary-item-label">Réf. DVF retenues</div>
-          <div className="summary-item-value">{data.dvf_refs.filter(r=>r.retenu).length} / {data.dvf_refs.length}</div>
-        </div>
+        ))}
       </div>
 
       {valeur > 0 && (
-        <div className="value-box">
-          <div>
-            <div className="value-box-label">VALEUR VÉNALE ESTIMÉE</div>
-            <div className="value-box-amount">{valeur.toLocaleString('fr-FR')} €</div>
-            <div className="value-box-range">
-              Fourchette : {(Math.round(valeur*0.93/1000)*1000).toLocaleString('fr-FR')} – {(Math.round(valeur*1.05/1000)*1000).toLocaleString('fr-FR')} €
-            </div>
+        <div className="synth-box">
+          <div className="synth-row synth-main">
+            <span>Valeur vénale retenue</span>
+            <span>{valeur.toLocaleString('fr-FR')} €</span>
           </div>
+          <div className="synth-row">
+            <span>Fourchette basse (−7 %)</span>
+            <span>{(Math.round(valeur*0.93/1000)*1000).toLocaleString('fr-FR')} €</span>
+          </div>
+          <div className="synth-row">
+            <span>Fourchette haute (+5 %)</span>
+            <span>{(Math.round(valeur*1.05/1000)*1000).toLocaleString('fr-FR')} €</span>
+          </div>
+          <div className="synth-row synth-liq">
+            <span>Valeur de liquidation rapide (−{decote} %)</span>
+            <span>{valLiq.toLocaleString('fr-FR')} €</span>
+          </div>
+          {tauxCapi && (
+            <div className="synth-row">
+              <span>Taux de capitalisation brut</span>
+              <span style={{color:parseFloat(tauxCapi)<4.5||parseFloat(tauxCapi)>9?'#8B2020':'#1A4A2E',fontWeight:600}}>
+                {tauxCapi} %
+              </span>
+            </div>
+          )}
         </div>
       )}
 
       {missingDiag.length > 0 && (
         <Alert type="warn">
           Réserves automatiques — diagnostics manquants : {missingDiag.join(', ')}.
-          Ces réserves apparaîtront dans le rapport généré.
+          Ces réserves apparaîtront dans le rapport.
         </Alert>
       )}
 
       <div className="sep" />
-      <Field label="Texte de la valeur retenue (pour la conclusion)"
-             hint="Optionnel — sera calculé automatiquement si vide">
+      <div className="sec-title">Paramètres de conclusion</div>
+      <div className="grid-2">
+        <Field label="Décote liquidation rapide (%)" hint="Banques : 15–20 % typique">
+          <input type="number" min="0" max="40" value={data.decote_liquidation}
+                 onChange={e => set('decote_liquidation', e.target.value)} />
+        </Field>
+        <Field label="Durée de validité du rapport">
+          <select value={data.duree_validite} onChange={e => set('duree_validite', e.target.value)}>
+            <option>6 mois à compter de la date du rapport</option>
+            <option>3 mois à compter de la date du rapport</option>
+            <option>12 mois à compter de la date du rapport</option>
+            <option>Valeur arrêtée à la date du rapport uniquement</option>
+          </select>
+        </Field>
+      </div>
+      <Field label="Texte de la valeur retenue (conclusion)"
+             hint="Optionnel — calculé automatiquement si vide">
         <input value={data.valeur_retenue_texte}
                onChange={e => set('valeur_retenue_texte', e.target.value)}
-               placeholder={`${(valeur||0).toLocaleString('fr-FR')}\u202f€ (${''} euros)`} />
+               placeholder={`${(valeur||0).toLocaleString('fr-FR')} € (… euros)`} />
       </Field>
 
       <button className="btn-generate" onClick={generer} disabled={loading || !data.demandeur_nom}>
-        {loading ? (
-          <><span className="spinner" /> Génération du rapport en cours…</>
-        ) : (
-          <>📄 Générer le rapport PDF</>
-        )}
+        {loading ? <><span className="spinner" /> Génération du rapport en cours…</> : <>📄 Générer le rapport PDF</>}
       </button>
 
       <div style={{marginTop:8,textAlign:'center',fontSize:11,color:'var(--muted)'}}>

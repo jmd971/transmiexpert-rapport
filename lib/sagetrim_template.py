@@ -22,10 +22,12 @@ from reportlab.lib import colors
 from reportlab.lib.units import cm, mm
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether, Image as RLImage
 )
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_JUSTIFY
 import datetime
+import io
+import base64
 
 # ─── PALETTE SAGETRIM ────────────────────────────────────────────────────────
 NAVY   = colors.HexColor("#1A2B45")
@@ -571,15 +573,40 @@ class RapportExpertise:
 
     def _section_IV_travaux(self):
         p = self.p
+        # Construire le texte de situation géographique
+        env_parts = []
+        if p.get("env_distance_centre"):
+            env_parts.append(f"Distance centre : {p['env_distance_centre']}.")
+        if p.get("env_acces"):
+            env_parts.append(f"Accès : {p['env_acces']}.")
+        if p.get("env_transports"):
+            env_parts.append(f"Transports : {p['env_transports']}.")
+        if p.get("env_commerces"):
+            env_parts.append(f"Commerces / services : {p['env_commerces']}.")
+        env_text = " ".join(env_parts) or p.get("environnement_immediat","")
+
+        # Marché local
+        marche_text = ""
+        if p.get("marche_tendance") or p.get("marche_tension"):
+            marche_text = (
+                f"Le marché immobilier local présente une tendance <b>{p.get('marche_tendance','Stable').lower()}</b> "
+                f"avec une tension offre/demande <b>{p.get('marche_tension','équilibrée').lower()}</b> "
+                f"au moment de l'expertise."
+            )
+
         self._add(
             self.C.section("IV  —  TRAVAUX D'EXPERTISE"),
             self._sp(6),
-            Paragraph("1  —  Situation géographique", self.S["h2"]),
+            Paragraph("1  —  Situation géographique et marché", self.S["h2"]),
             Paragraph(p.get("situation_geographique",
                 "Le bien immobilier se situe dans la commune de "
                 f"{p.get('commune','')}, dans un secteur "
                 f"{p.get('zone_urbanisme','urbanisé résidentiel')}. "
-                f"{p.get('environnement_immediat','')}"), self.S["j"]),
+                f"{env_text}"), self.S["j"]),
+        )
+        if marche_text:
+            self._add(self._sp(3), Paragraph(marche_text, self.S["j"]))
+        self._add(
             self._sp(4),
             Paragraph("2  —  Situation juridique", self.S["h2"]),
             Paragraph("<b>Droit de propriété</b>", self.S["h3"]),
@@ -601,6 +628,126 @@ class RapportExpertise:
         )
         self._section_IV_description()
         self._section_IV_risques()
+
+    # ─── TABLEAU VÉTUSTÉ DÉCOMPOSÉE ───────────────────────────────────────────
+    def _vetuste_table(self, postes):
+        """Renvoie un Table ReportLab avec le détail vétusté par poste."""
+        header = [Paragraph(f"<b>{h}</b>", self.S["lbl"]) for h in
+                  ["Poste", "% coût", "Âge eff.", "Durée vie", "Vét. poste", "Contrib."]]
+        rows = [header]
+        total_contrib = 0.0
+        for p in postes:
+            age  = float(p.get("age_effectif", 0) or 0)
+            dv   = float(p.get("duree_vie", 1) or 1)
+            pct  = float(p.get("pct_cout", 0) or 0)
+            vet  = min(age / dv, 1.0)
+            contrib = pct * vet
+            total_contrib += contrib
+            rows.append([
+                Paragraph(p.get("poste", ""), self.S["sm"]),
+                Paragraph(f"{pct:.0f} %", self.S["sm"]),
+                Paragraph(f"{age:.0f} ans", self.S["sm"]),
+                Paragraph(f"{dv:.0f} ans", self.S["sm"]),
+                Paragraph(f"{vet*100:.0f} %", self.S["sm"]),
+                Paragraph(f"{contrib:.1f} %", self.S["sm"]),
+            ])
+        rows.append([
+            Paragraph("<b>VÉTUSTÉ GLOBALE PONDÉRÉE</b>", self.S["lbl"]),
+            Paragraph("", self.S["sm"]),
+            Paragraph("", self.S["sm"]),
+            Paragraph("", self.S["sm"]),
+            Paragraph("", self.S["sm"]),
+            Paragraph(f"<b>{total_contrib:.1f} %</b>", self.S["lbl"]),
+        ])
+        widths = [6.5*cm, 1.5*cm, 1.8*cm, 2*cm, 1.8*cm, CW - 13.6*cm]
+        t = Table(rows, colWidths=widths)
+        t.setStyle(TableStyle([
+            ("BACKGROUND",    (0,0),(-1,0),  NAVY),
+            ("TEXTCOLOR",     (0,0),(-1,0),  W),
+            ("FONTSIZE",      (0,0),(-1,0),  8),
+            ("ROWBACKGROUNDS",(0,1),(-1,-2), [W, LIGHT]),
+            ("BACKGROUND",    (0,-1),(-1,-1),colors.HexColor("#EAF0E8")),
+            ("LINEABOVE",     (0,-1),(-1,-1),2,GOLD),
+            ("GRID",          (0,0),(-1,-1), 0.3, BORDER),
+            ("TOPPADDING",    (0,0),(-1,-1), 3),
+            ("BOTTOMPADDING", (0,0),(-1,-1), 3),
+            ("LEFTPADDING",   (0,0),(-1,-1), 4),
+            ("VALIGN",        (0,0),(-1,-1), "MIDDLE"),
+        ]))
+        return t
+
+    # ─── TABLEAU CARACTÉRISTIQUES PHYSIQUES ────────────────────────────────────
+    def _carac_physiques_table(self, postes):
+        header = [Paragraph(f"<b>{h}</b>", self.S["lbl"]) for h in
+                  ["Poste", "État constaté", "Observations"]]
+        rows = [header]
+        for c in postes:
+            rows.append([
+                Paragraph(c.get("poste", ""), self.S["sm"]),
+                Paragraph(c.get("etat", ""), self.S["sm"]),
+                Paragraph(c.get("notes", ""), self.S["smm"]),
+            ])
+        widths = [4.5*cm, 3*cm, CW - 7.5*cm]
+        t = Table(rows, colWidths=widths)
+        t.setStyle(TableStyle([
+            ("BACKGROUND",    (0,0),(-1,0),  NAVY),
+            ("TEXTCOLOR",     (0,0),(-1,0),  W),
+            ("FONTSIZE",      (0,0),(-1,0),  8),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1), [W, LIGHT]),
+            ("GRID",          (0,0),(-1,-1), 0.3, BORDER),
+            ("TOPPADDING",    (0,0),(-1,-1), 3),
+            ("BOTTOMPADDING", (0,0),(-1,-1), 3),
+            ("LEFTPADDING",   (0,0),(-1,-1), 4),
+            ("VALIGN",        (0,0),(-1,-1), "TOP"),
+        ]))
+        return t
+
+    # ─── EMBED PHOTOS ─────────────────────────────────────────────────────────
+    def _embed_photos(self, photos):
+        """Insère les photos 2 par ligne avec légende."""
+        MAX_W = (CW - 0.5*cm) / 2
+        MAX_H = MAX_W * 0.75  # ratio 4:3
+        elements = []
+        for i in range(0, len(photos), 2):
+            pair = photos[i:i+2]
+            img_cells = []
+            cap_cells = []
+            for photo in pair:
+                data_url = photo.get("data","")
+                caption  = photo.get("caption","") or photo.get("name","")
+                try:
+                    if "," in data_url:
+                        raw = base64.b64decode(data_url.split(",",1)[1])
+                    else:
+                        raw = base64.b64decode(data_url)
+                    buf = io.BytesIO(raw)
+                    img = RLImage(buf, width=MAX_W, height=MAX_H)
+                    img_cells.append(img)
+                except Exception:
+                    img_cells.append(Paragraph("[Photo indisponible]", self.S["smm"]))
+                cap_cells.append(Paragraph(caption or "", self.S["smm"]))
+            # Pad to 2 cols
+            while len(img_cells) < 2:
+                img_cells.append(Paragraph("", self.S["sm"]))
+                cap_cells.append(Paragraph("", self.S["sm"]))
+            t_imgs = Table([img_cells], colWidths=[MAX_W, MAX_W])
+            t_imgs.setStyle(TableStyle([
+                ("ALIGN",        (0,0),(-1,-1), "CENTER"),
+                ("LEFTPADDING",  (0,0),(-1,-1), 4),
+                ("RIGHTPADDING", (0,0),(-1,-1), 4),
+                ("TOPPADDING",   (0,0),(-1,-1), 2),
+            ]))
+            t_caps = Table([cap_cells], colWidths=[MAX_W, MAX_W])
+            t_caps.setStyle(TableStyle([
+                ("ALIGN",       (0,0),(-1,-1), "CENTER"),
+                ("FONTSIZE",    (0,0),(-1,-1), 8),
+                ("TEXTCOLOR",   (0,0),(-1,-1), MUTED),
+                ("TOPPADDING",  (0,0),(-1,-1), 2),
+                ("BOTTOMPADDING",(0,0),(-1,-1), 6),
+            ]))
+            elements.append(t_imgs)
+            elements.append(t_caps)
+        return elements
 
     def _section_IV_description(self):
         p = self.p
@@ -671,6 +818,31 @@ class RapportExpertise:
                     f"{p.get('terrain_notes','')}"), self.S["j"]),
                 self._sp(4),
             )
+
+        # Caractéristiques physiques par poste
+        carac = p.get("carac_physiques")
+        if carac and t != "terrain":
+            self._add(
+                self._sp(4),
+                Paragraph("3-X  État des composants — Constat lors de la visite", self.S["h3"]),
+                self._carac_physiques_table(carac),
+                self._sp(4),
+            )
+
+        # Vétusté décomposée (maison uniquement)
+        if t == "maison":
+            postes_vet = p.get("vetuste_postes")
+            if postes_vet and len(postes_vet) > 0:
+                self._add(
+                    Paragraph("3-X  Vétusté décomposée par poste (méthode pondérée)", self.S["h3"]),
+                    self.C.legal(
+                        "La vétusté est calculée poste par poste, pondérée par le "
+                        "pourcentage de coût de chaque élément. La vétusté globale est la somme des contributions."
+                    ),
+                    self._sp(4),
+                    self._vetuste_table(postes_vet),
+                    self._sp(4),
+                )
 
         # Note SDP obligatoire
         self._add(
@@ -1002,6 +1174,56 @@ class RapportExpertise:
             self._sp(6),
         )
 
+        # Valeur locative et taux de capitalisation
+        val_loc = float(p.get("valeur_locative_mensuelle") or 0)
+        val_retenue_txt = p.get("valeur_retenue_texte","")
+        # Essayer d'extraire une valeur numérique pour le taux capi
+        import re
+        val_num = 0
+        if val_retenue_txt:
+            m = re.search(r"([\d\s ]+)", val_retenue_txt.replace(",",""))
+            if m:
+                try:
+                    val_num = float(m.group(1).replace(" ","").replace(" ",""))
+                except ValueError:
+                    pass
+        if val_loc > 0 and val_num > 0:
+            taux_capi = val_loc * 12 / val_num * 100
+            self._add(
+                Paragraph("Valeur locative de marché", self.S["h3"]),
+                self.C.kv([
+                    ("Loyer mensuel de marché estimé",   f"{val_loc:,.0f} € / mois (charges non comprises)".replace(","," ")),
+                    ("Revenu locatif annuel estimé",      f"{val_loc*12:,.0f} € / an".replace(","," ")),
+                    ("Taux de capitalisation brut",       f"{taux_capi:.1f} %  (Marché Guadeloupe : 5–8 % brut typique)"),
+                ]),
+                self._sp(4),
+            )
+
+        # Valeur de liquidation rapide
+        decote_liq = float(p.get("decote_liquidation") or 15)
+        if val_num > 0 and decote_liq > 0:
+            val_liq = round(val_num * (1 - decote_liq/100) / 1000) * 1000
+            self._add(
+                Paragraph("Valeur de liquidation rapide", self.S["h3"]),
+                Paragraph(
+                    f"Dans l'hypothèse d'une cession rapide (délai réduit — vente contrainte), "
+                    f"une décote de {decote_liq:.0f} % est usuellement retenue sur le marché guadeloupéen.",
+                    self.S["j"]),
+                self.C.kv([
+                    ("Valeur vénale",         self._fmt(val_num)),
+                    (f"Décote liquidation ({decote_liq:.0f} %)", f"− {self._fmt(val_num*decote_liq/100)}"),
+                    ("<b>Valeur de liquidation rapide</b>", f"<b>{self._fmt(val_liq)}</b>"),
+                ]),
+                self._sp(6),
+            )
+
+        # Durée de validité
+        duree = p.get("duree_validite","6 mois à compter de la date du rapport")
+        self._add(
+            self.C.legal(f"Durée de validité du présent rapport : {duree}."),
+            self._sp(4),
+        )
+
         # Réserves finales
         if self._reserves:
             self._add(Paragraph("Réserves émises :", self.S["h3"]))
@@ -1051,7 +1273,6 @@ class RapportExpertise:
     def _section_VII_annexes(self):
         p = self.p
         annexes = p.get("annexes", [
-            "Reportage photographique",
             "Titre de propriété",
             "Extrait du plan cadastral",
             "État des risques naturels et technologiques (ERP)",
@@ -1061,7 +1282,23 @@ class RapportExpertise:
             self.C.section("VII  —  ANNEXES"),
             self._sp(6),
             Paragraph("A — Reportage photographique", self.S["h2"]),
-            Paragraph("[Photos à insérer ici]", self.S["it"]),
+        )
+        photos = p.get("photos")
+        if photos and len(photos) > 0:
+            self._add(
+                Paragraph(
+                    f"Visite du {p.get('date_visite','')} — "
+                    f"{len(photos)} photographie(s) jointe(s).",
+                    self.S["it"]),
+                self._sp(4),
+            )
+            for elem in self._embed_photos(photos):
+                self._add(elem)
+        else:
+            self._add(Paragraph(
+                "Aucune photographie transmise dans le présent dossier.",
+                self.S["it"]))
+        self._add(
             self._sp(6),
             Paragraph("B — Documents exploités", self.S["h2"]),
         )
