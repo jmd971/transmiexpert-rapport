@@ -226,10 +226,31 @@ export default function ExpertForm() {
     }
 
     try {
+      // Construire FormData avec paramètres JSON + fichiers photos en binaire
+      const formData = new FormData()
+      formData.append('data', JSON.stringify(params))
+
+      // Convertir les photos (dataURL → Blob) et les ajouter à FormData
+      if (data.photos && data.photos.length > 0) {
+        for (let i = 0; i < data.photos.length; i++) {
+          const photo = data.photos[i]
+          // Convertir dataURL en Blob
+          const [header, base64] = photo.data.split(',')
+          const mimeMatch = header.match(/:(.*?);/)
+          const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg'
+          const binary = atob(base64)
+          const bytes = new Uint8Array(binary.length)
+          for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j)
+          const blob = new Blob([bytes], { type: mime })
+          formData.append(`photo_${i}`, blob, photo.name)
+          formData.append(`photo_${i}_caption`, photo.caption || '')
+        }
+      }
+
       const res = await fetch('/api/generer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
+        body: formData,
+        // NE PAS définir Content-Type — le navigateur l'ajoute automatiquement avec la boundary
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))

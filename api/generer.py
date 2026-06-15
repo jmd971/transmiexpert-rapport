@@ -1,6 +1,6 @@
 """
 /api/generer.py
-Endpoint Vercel Python — reçoit les paramètres du formulaire,
+Endpoint Vercel Python — reçoit les paramètres du formulaire (multipart/form-data),
 génère le rapport PDF, retourne le fichier en téléchargement.
 """
 
@@ -10,6 +10,7 @@ import json
 import base64
 import tempfile
 import traceback
+from io import BytesIO
 
 # Ajouter lib/ au path pour importer sagetrim_template
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))
@@ -28,14 +29,32 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """
-        Reçoit un JSON POST avec les paramètres du rapport,
-        génère le PDF, retourne en base64 ou binaire.
+        Reçoit multipart/form-data :
+        - 'data' field : paramètres JSON du rapport
+        - 'photo_N' files : images
+        - 'photo_N_caption' : légende de la photo N
+        
+        Génère le PDF et le retourne.
         """
         try:
-            # Lire le body JSON
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length)
-            params = json.loads(body.decode('utf-8'))
+            import cgi
+            
+            # Parser le multipart
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ={
+                    'REQUEST_METHOD': 'POST',
+                }
+            )
+
+            # Extraire les paramètres JSON
+            if 'data' not in form:
+                self._json_error(400, "champ 'data' (JSON) manquant")
+                return
+
+            data_json = form['data'].value
+            params = json.loads(data_json)
 
             # Valider les paramètres obligatoires
             if not params.get('demandeur_nom'):
@@ -44,6 +63,31 @@ class handler(BaseHTTPRequestHandler):
             if not params.get('type_bien'):
                 self._json_error(400, "type_bien est obligatoire (maison/appartement/terrain)")
                 return
+
+            # Extraire les photos du formulaire
+            photos = []
+            i = 0
+            while f'photo_{i}' in form:
+                file_item = form[f'photo_{i}']
+                caption = form.get(f'photo_{i}_caption', '')
+                if isinstance(caption, list):
+                    caption = caption[0].value if caption else ''
+                else:
+                    caption = caption.value if hasattr(caption, 'value') else str(caption)
+
+                # Lire le fichier binaire
+                photo_bytes = file_item.file.read()
+                
+                photos.append({
+                    'name': file_item.filename,
+                    'data': photo_bytes,  # données binaires, pas base64
+                    'caption': caption,
+                })
+                i += 1
+
+            # Ajouter les photos aux paramètres pour RapportExpertise
+            if photos:
+                params['photos'] = photos
 
             # Générer le PDF dans un fichier temporaire
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:

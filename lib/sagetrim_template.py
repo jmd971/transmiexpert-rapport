@@ -713,17 +713,27 @@ class RapportExpertise:
             img_cells = []
             cap_cells = []
             for photo in pair:
-                data_url = photo.get("data","")
+                data = photo.get("data","")
                 caption  = photo.get("caption","") or photo.get("name","")
                 try:
-                    if "," in data_url:
-                        raw = base64.b64decode(data_url.split(",",1)[1])
+                    # Gérer deux formats : binaire (bytes) ou base64 (string)
+                    if isinstance(data, bytes):
+                        # Format multipart : données binaires directes
+                        raw = data
+                    elif isinstance(data, str):
+                        # Format JSON : base64 (dataURL ou raw base64)
+                        if "," in data:
+                            raw = base64.b64decode(data.split(",",1)[1])
+                        else:
+                            raw = base64.b64decode(data)
                     else:
-                        raw = base64.b64decode(data_url)
+                        raise ValueError(f"Type de donnée photo non reconnu : {type(data)}")
+                    
                     buf = io.BytesIO(raw)
                     img = RLImage(buf, width=MAX_W, height=MAX_H)
                     img_cells.append(img)
-                except Exception:
+                except Exception as e:
+                    print(f"[WARN] Photo {caption} indisponible : {e}")
                     img_cells.append(Paragraph("[Photo indisponible]", self.S["smm"]))
                 cap_cells.append(Paragraph(caption or "", self.S["smm"]))
             # Pad to 2 cols
