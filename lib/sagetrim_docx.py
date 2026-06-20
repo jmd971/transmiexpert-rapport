@@ -562,6 +562,11 @@ class RapportExpertise:
         self.para("Je déclare accepter la présente mission.")
         self.para("Je m'engage à la remplir fidèlement, consciencieusement et impartialement, "
                   f"conformément aux dispositions de la <b>{CABINET['norme']}</b>.")
+        self.para(
+            "Je certifie n'avoir aucun lien d'intérêt, direct ou indirect, avec le bien expertisé "
+            "ou avec les parties, de nature à compromettre mon indépendance ou mon objectivité. La présente "
+            "expertise a été conduite en toute indépendance ; les honoraires y afférents ne sont liés ni au "
+            "résultat de l'évaluation ni à la conclusion du rapport.")
         self._spacer(16)
         self.para(CABINET["nom"], size=11, color=NAVY, align='right', space_after=2)
         self.para(CABINET["expert"], size=11, color=NAVY, align='right', space_after=4)
@@ -609,6 +614,28 @@ class RapportExpertise:
             f"Référence dossier : {p.get('ref','')}  •  "
             f"Date du rapport : {p.get('date_rapport','')}  •  "
             f"Méthodes : {self._label_methodes()}")
+        self.h2("4  —  Base de la valeur et date d'effet")
+        self.para(
+            "La valeur recherchée est la <b>valeur vénale</b>, définie comme le montant estimé auquel le bien "
+            "devrait s'échanger, à la date de l'évaluation, entre un acheteur et un vendeur consentants, dans "
+            "le cadre d'une transaction équilibrée conclue dans des conditions normales de concurrence, après "
+            "une commercialisation adéquate, où chacune des parties a agi en connaissance de cause, prudemment "
+            "et sans contrainte.")
+        _dval = p.get("date_visite") or p.get("date_rapport", "")
+        self.para(
+            f"La valeur est arrêtée à la date de nos constatations sur place, le <b>{_dval}</b>. Elle s'entend "
+            "hors droits de mutation, frais d'acte et fiscalité éventuelle, pour la pleine propriété d'un bien "
+            "libre de toute occupation, sauf mention contraire au présent rapport.")
+        self.h2("5  —  Étendue et limites des investigations")
+        self.para(
+            "Nos investigations ont consisté en une visite des lieux, l'examen des documents qui nous ont été "
+            "communiqués et l'analyse des données de marché disponibles. Elles n'ont pas comporté de sondage "
+            "destructif, de vérification de la solidité des structures, ni de relevé métré par géomètre : les "
+            "surfaces indiquées sont reprises des documents fournis ou de nos constatations, à titre indicatif.")
+        self.para(
+            "Nous avons présumé exactes et sincères les informations et pièces transmises par le demandeur, "
+            "sans en garantir l'authenticité juridique. Le présent rapport ne se substitue ni aux diagnostics "
+            "techniques réglementaires, ni à l'analyse notariale du titre de propriété.")
 
     def _label_methodes(self):
         t = self.p.get("type_bien", "maison")
@@ -679,6 +706,7 @@ class RapportExpertise:
         ])
         self._section_IV_description()
         self._section_IV_risques()
+        self._section_IV_swot()
 
     def _surfaces_kv(self):
         p = self.p
@@ -779,6 +807,25 @@ class RapportExpertise:
         ]
         self.risque_table(risques)
 
+    def _section_IV_swot(self):
+        p = self.p
+        forts = [l.strip() for l in (p.get("points_forts") or "").splitlines() if l.strip()]
+        faibles = [l.strip() for l in (p.get("points_faibles") or "").splitlines() if l.strip()]
+        if not forts and not faibles:
+            return
+        self.h2("5  —  Points forts et points faibles")
+        self.para(
+            "L'appréciation qualitative du bien fait ressortir les éléments suivants, qui ont été pris en "
+            "compte dans la détermination de la valeur :")
+        if forts:
+            self.h3("Points forts")
+            for f in forts:
+                self.bullet(f)
+        if faibles:
+            self.h3("Points de vigilance")
+            for f in faibles:
+                self.bullet(f)
+
     # ─── SECTION V — ÉVALUATION ───────────────────────────────────────────────
     def _section_V_evaluation(self):
         t = self.p.get("type_bien", "maison")
@@ -853,6 +900,16 @@ class RapportExpertise:
             ("Prix corrigé /m²",   f"{pm2_corrige:,.0f}".replace(",", " ") + " €/m²"),
             ("<b>Valeur méthode 1</b>", f"<b>{self._fmt(val_comp)}</b>"),
         ])
+        _med = f"{pm2_median:,.0f}".replace(",", " ")
+        _corr = ""
+        if corrections:
+            _pc = f"{pm2_corrige:,.0f}".replace(",", " ")
+            _corr = (f" Après application des corrections justifiées ci-dessus, le prix unitaire retenu "
+                     f"s'établit à {_pc} €/m².")
+        self.para(
+            f"L'analyse des transactions comparables issues de la base DVF fait ressortir un prix de marché "
+            f"médian de {_med} €/m².{_corr} Appliqué à la surface de plancher de {sdp:.0f} m² du bien "
+            f"expertisé, ce prix conduit à une valeur par comparaison directe de {self._fmt(val_comp)}.")
         return val_comp
 
     def _methode_sol_construction(self):
@@ -892,6 +949,10 @@ class RapportExpertise:
             ("VC (construction)", self._fmt(vc_nette)),
             ("<b>Valeur méthode 2</b>", f"<b>{self._fmt(val_sc)}</b>"),
         ])
+        self.para(
+            f"Cette méthode reconstitue la valeur du bien en additionnant la valeur du terrain "
+            f"({self._fmt(vt_nette)}) et celle de la construction, après déduction de sa vétusté "
+            f"({self._fmt(vc_nette)}), soit une valeur par sol et construction de {self._fmt(val_sc)}.")
         self.legal(
             "Note : le coût de 1 450 €/m² est calculé sur la Surface de Plancher (SDP) "
             "conformément à l'art. R. 111-22 du Code de l'urbanisme. "
@@ -958,6 +1019,11 @@ class RapportExpertise:
 
         self.h2("5-X  Synthèse — Pondération des méthodes")
         self.synth_table(rows)
+        self.para(
+            "Les méthodes mises en œuvre sont convergentes. Après pondération tenant compte de la fiabilité "
+            "respective de chacune au regard du bien et des données disponibles, nous arrêtons la valeur vénale "
+            f"à {self._fmt(val_ret)}, dans une fourchette comprise entre {self._fmt(val_min)} et "
+            f"{self._fmt(val_max)}.")
         if decote_sci:
             self.reserve(
                 f"SCI — Décote de {decote_sci} % appliquée pour illiquidité des parts "
@@ -990,6 +1056,10 @@ class RapportExpertise:
     def _section_VI_conclusions(self):
         p = self.p
         self.section("VI  —  CONCLUSIONS")
+        self.para(
+            "Au terme de nos investigations et compte tenu de l'ensemble des éléments exposés dans le présent "
+            "rapport — situation du bien, caractéristiques, état du marché local et résultats convergents des "
+            "méthodes mises en œuvre — nous formulons la conclusion suivante.")
         self.para(self._build_conclusion_text())
         self.para("Les chiffres ci-dessus sont donnés hors fiscalité et hors frais d'acte.",
                   size=9, color=MUTED, italic=True)
@@ -1026,6 +1096,11 @@ class RapportExpertise:
                 ("<b>Valeur de liquidation rapide</b>", f"<b>{self._fmt(val_liq)}</b>"),
             ])
 
+        delai = p.get("delai_commercialisation")
+        if delai:
+            self.para(
+                "Dans des conditions normales de marché, le délai de commercialisation du bien à la valeur "
+                f"retenue est estimé à <b>{delai}</b>.")
         duree = p.get("duree_validite", "6 mois à compter de la date du rapport")
         self.legal(f"Durée de validité du présent rapport : {duree}.")
 

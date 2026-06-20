@@ -71,6 +71,11 @@ const initialData = {
   surface_habitable: '',
   surface_carrez: '',
 
+  // Analyse qualitative
+  points_forts: '',
+  points_faibles: '',
+  delai_commercialisation: '6 à 9 mois',
+
   // Environnement & marché
   env_distance_centre: '',
   env_acces: '',
@@ -1074,6 +1079,23 @@ function StepRisques({ data, set }) {
                   checked={data[key]} onChange={v => set(key, v)} />
         ))}
       </div>
+
+      <div className="sep" />
+      <div className="sec-title">Analyse — points forts &amp; points faibles</div>
+      <div className="grid-2">
+        <Field label="Points forts" hint="Un par ligne (atouts du bien)">
+          <textarea value={data.points_forts} onChange={e => set('points_forts', e.target.value)}
+                    placeholder={"Exposition traversante\nProche commerces et écoles\nToiture refaite en 2015"} />
+        </Field>
+        <Field label="Points de vigilance" hint="Un par ligne">
+          <textarea value={data.points_faibles} onChange={e => set('points_faibles', e.target.value)}
+                    placeholder={"Rafraîchissement à prévoir\nAbsence de garage\nVoie passante à proximité"} />
+        </Field>
+      </div>
+      <Field label="Délai de commercialisation normal estimé" hint="Délai de vente attendu en conditions normales">
+        <input value={data.delai_commercialisation} onChange={e => set('delai_commercialisation', e.target.value)}
+               placeholder="6 à 9 mois" />
+      </Field>
     </div>
   )
 }
