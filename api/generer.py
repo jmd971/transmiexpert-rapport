@@ -16,7 +16,7 @@ from io import BytesIO
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))
 
 from http.server import BaseHTTPRequestHandler
-from sagetrim_template import RapportExpertise
+from sagetrim_docx import RapportExpertise
 
 
 class handler(BaseHTTPRequestHandler):
@@ -87,7 +87,7 @@ class handler(BaseHTTPRequestHandler):
                 params['photos'] = photos
 
             # Générer le PDF dans un fichier temporaire
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp:
                 tmp_path = tmp.name
 
             rapport = RapportExpertise(params)
@@ -103,12 +103,12 @@ class handler(BaseHTTPRequestHandler):
             # Construire le nom de fichier
             ref    = params.get('ref', 'rapport').replace('/', '-')
             nom    = params.get('demandeur_nom', '').split()[0] if params.get('demandeur_nom') else 'client'
-            fname  = f"rapport_expertise_{ref}_{nom}.pdf"
+            fname  = f"rapport_expertise_{ref}_{nom}.docx"
 
             # Retourner le PDF
             self.send_response(200)
             self._cors_headers()
-            self.send_header('Content-Type', 'application/pdf')
+            self.send_header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
             self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
             self.send_header('Content-Length', str(len(pdf_bytes)))
             self.end_headers()

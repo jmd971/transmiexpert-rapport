@@ -9,7 +9,7 @@ const STEPS = [
   { id: 'photos',      icon: '📷', title: 'Photos',         sub: 'Reportage de visite' },
   { id: 'risques',     icon: '⚠️',  title: 'Risques',        sub: 'Naturels et diagnostics' },
   { id: 'evaluation',  icon: '📊', title: 'Évaluation',     sub: 'DVF et calcul de valeur' },
-  { id: 'generation',  icon: '✅', title: 'Génération',     sub: 'Vérification et PDF' },
+  { id: 'generation',  icon: '✅', title: 'Génération',     sub: 'Vérification et Word' },
 ]
 
 // ─── Vétusté standard Guadeloupe ─────────────────────────────────────────────
@@ -262,7 +262,7 @@ export default function ExpertForm() {
       a.href     = url
       const ref  = data.ref.replace(/\//g, '-')
       const nom  = data.demandeur_nom.split(' ')[0] || 'client'
-      a.download = `rapport_expertise_${ref}_${nom}.pdf`
+      a.download = `rapport_expertise_${ref}_${nom}.docx`
       a.click()
       URL.revokeObjectURL(url)
       setSuccess(true)
@@ -1143,7 +1143,7 @@ function StepGeneration({ data, set, computeValue, generer, loading, error, succ
 
   return (
     <div>
-      {success && <Alert type="ok">✓ Rapport généré avec succès ! Le PDF a été téléchargé.</Alert>}
+      {success && <Alert type="ok">✓ Rapport généré avec succès ! Le document Word a été téléchargé.</Alert>}
       {error   && <Alert type="err">Erreur de génération : {error}</Alert>}
 
       <div className="sec-title">Récapitulatif du dossier</div>
@@ -1226,11 +1226,11 @@ function StepGeneration({ data, set, computeValue, generer, loading, error, succ
       </Field>
 
       <button className="btn-generate" onClick={generer} disabled={loading || !data.demandeur_nom}>
-        {loading ? <><span className="spinner" /> Génération du rapport en cours…</> : <>📄 Générer le rapport PDF</>}
+        {loading ? <><span className="spinner" /> Génération du rapport en cours…</> : <>📄 Générer le rapport Word</>}
       </button>
 
       <div style={{marginTop:8,textAlign:'center',fontSize:11,color:'var(--muted)'}}>
-        Le PDF SAGETRIM sera téléchargé automatiquement · Conforme Charte TEGoVA
+        Le document Word SAGETRIM sera téléchargé automatiquement · Conforme Charte TEGoVA
       </div>
     </div>
   )
