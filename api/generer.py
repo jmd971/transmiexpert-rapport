@@ -69,11 +69,8 @@ class handler(BaseHTTPRequestHandler):
             i = 0
             while f'photo_{i}' in form:
                 file_item = form[f'photo_{i}']
-                caption = form.get(f'photo_{i}_caption', '')
-                if isinstance(caption, list):
-                    caption = caption[0].value if caption else ''
-                else:
-                    caption = caption.value if hasattr(caption, 'value') else str(caption)
+                # cgi.FieldStorage n'expose pas .get() — utiliser getfirst()
+                caption = form.getfirst(f'photo_{i}_caption', '')
 
                 # Lire le fichier binaire
                 photo_bytes = file_item.file.read()
