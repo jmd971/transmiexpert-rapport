@@ -450,6 +450,33 @@ function StepMission({ data, set }) {
 // ÉTAPE 2 — IDENTIFICATION DU BIEN
 // ═══════════════════════════════════════════════════════════════════════════════
 function StepBien({ data, set }) {
+  const [iccMsg, setIccMsg] = useState(null)
+  const [iccLoading, setIccLoading] = useState(false)
+
+  const recupICC = async () => {
+    const s = data.origine_date_acquisition || ''
+    const ym = s.match(/(?:19|20)\d{2}/)
+    if (!ym) { setIccMsg({ type:'warn', text:"Renseignez d'abord la date d'acquisition (avec l'année)." }); return }
+    const annee = ym[0]
+    const mois = ['janvier','février','fevrier','mars','avril','mai','juin','juillet','août','aout','septembre','octobre','novembre','décembre','decembre']
+    const moisNum = [1,2,2,3,4,5,6,7,8,8,9,10,11,12,12]
+    const idx = mois.findIndex(m => s.toLowerCase().includes(m))
+    const trimestre = idx >= 0 ? Math.floor((moisNum[idx] - 1) / 3) + 1 : ''
+    setIccLoading(true); setIccMsg(null)
+    try {
+      const res = await fetch(`/api/icc?annee=${annee}${trimestre ? `&trimestre=${trimestre}` : ''}`)
+      const out = await res.json()
+      if (!res.ok) throw new Error(out.error || `Erreur ${res.status}`)
+      if (out.acquisition) set('origine_indice_icc', String(out.acquisition.indice))
+      if (out.actuel) set('origine_indice_icc_actuel', String(out.actuel.indice))
+      setIccMsg({ type:'ok', text:`${out.acquisition ? `Acquisition : ${out.acquisition.periode} = ${out.acquisition.indice}  ·  ` : ''}Actuel : ${out.actuel.periode} = ${out.actuel.indice} (INSEE).` })
+    } catch (e) {
+      setIccMsg({ type:'err', text:`Récupération ICC impossible : ${e.message}` })
+    } finally {
+      setIccLoading(false)
+    }
+  }
+
   return (
     <div>
       <div className="sec-title">Type de bien</div>
@@ -564,6 +591,17 @@ function StepBien({ data, set }) {
                  placeholder="2146" />
         </Field>
       </div>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
+        <button className="btn btn-secondary" style={{fontSize:13}} onClick={recupICC} disabled={iccLoading}>
+          {iccLoading ? '⏳ Récupération…' : '⟳ Récupérer l\'ICC automatiquement (INSEE)'}
+        </button>
+        <span style={{fontSize:11,color:'var(--muted)'}}>Remplit les deux indices d'après la date d'acquisition</span>
+      </div>
+      {iccMsg && (
+        <div style={{marginTop:8}}>
+          <Alert type={iccMsg.type === 'ok' ? 'ok' : iccMsg.type === 'warn' ? 'warn' : 'err'}>{iccMsg.text}</Alert>
+        </div>
+      )}
 
       <div className="sep" />
       <div className="sec-title">Servitudes, mitoyenneté & occupation</div>
