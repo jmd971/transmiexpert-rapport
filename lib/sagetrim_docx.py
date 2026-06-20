@@ -178,6 +178,17 @@ class RapportExpertise:
         p.setdefault("zone_sismique", "V")
         p.setdefault("assainissement", "Collectif")
         p.setdefault("reserves_initiales", "Néant sauf indication contraire")
+        if p.get("type_bien") == "maison" and not p.get("vente_anterieure"):
+            _prix = float(p.get("origine_prix_acquisition") or 0)
+            _ib = float(p.get("origine_indice_icc") or 0)
+            _ir = float(p.get("origine_indice_icc_actuel") or 0)
+            if _prix > 0 and _ib > 0 and _ir > 0:
+                p["vente_anterieure"] = {
+                    "prix": _prix, "date": p.get("origine_date_acquisition", ""),
+                    "indice_base": _ib, "indice_revision": _ir,
+                    "trimestre_base": "trimestre d'acquisition",
+                    "trimestre_revision": "dernier trimestre publié",
+                }
         return p
 
     # ── MISE EN PAGE / EN-TÊTE / PIED ─────────────────────────────────────────
@@ -640,17 +651,43 @@ class RapportExpertise:
         self.para(p.get("origine_propriete",
             f"{p.get('demandeur_nom','')} est propriétaire du bien "
             "dont l'origine de propriété est précisée dans le titre transmis."))
+        if any(p.get(k) for k in ("origine_nature", "origine_date_acquisition", "origine_prix_acquisition", "origine_notaire")):
+            _prix = p.get("origine_prix_acquisition")
+            self.kv([
+                ("Nature de l'acquisition", p.get("origine_nature", "")),
+                ("Date d'acquisition",      p.get("origine_date_acquisition", "") or "—"),
+                ("Prix d'acquisition",      self._fmt(float(_prix)) if _prix else "—"),
+                ("Notaire / étude",         p.get("origine_notaire", "") or "—"),
+            ])
         self.h3("Données cadastrales et urbanisme")
         self.kv([
             ("Référence cadastrale", f"Section {p.get('cadastre_section','')} — N° {p.get('cadastre_num','')}"),
             ("Lieu-dit",             p.get("lieu_dit", "")),
             ("Contenance",           f"{p.get('terrain_m2','')} m²"),
-            ("Zonage PLU",           p.get("zonage_plu", "")),
+            ("Zonage PLU",                  p.get("zonage_plu", "")),
+            ("Constructibilité résiduelle", p.get("constructibilite") or "Non précisée"),
+            ("Droit de préemption urbain",  p.get("dpu", "À vérifier")),
             ("Lot de copropriété",   p.get("lot_copro", "—") if p.get("type_bien") == "appartement" else "—"),
             ("Millièmes",            p.get("millesimes", "—") if p.get("type_bien") == "appartement" else "—"),
         ])
+        self.h3("Servitudes, mitoyenneté et occupation")
+        self.kv([
+            ("Servitudes",             p.get("servitudes") or "Aucune servitude déclarée"),
+            ("Mitoyenneté",            p.get("mitoyennete") or "Néant"),
+            ("Situation d'occupation", p.get("situation_occupation", "") or "—"),
+            ("Détail du bail",         p.get("bail_details") or "—"),
+        ])
         self._section_IV_description()
         self._section_IV_risques()
+
+    def _surfaces_kv(self):
+        p = self.p
+        rows = [("Surface de plancher (SDP)", f"{p.get('sdp','')} m²")]
+        if p.get("surface_habitable"):
+            rows.append(("Surface habitable", f"{p['surface_habitable']} m²"))
+        if p.get("type_bien") == "appartement" and p.get("surface_carrez"):
+            rows.append(("Surface loi Carrez", f"{p['surface_carrez']} m²"))
+        self.kv(rows)
 
     def _section_IV_description(self):
         p = self.p
@@ -663,6 +700,7 @@ class RapportExpertise:
                 f"Construction datant de {p.get('annee_construction','')}. "
                 f"État général : {p.get('etat_general','bon état')}. "
                 f"Surface de plancher (SDP) : {p.get('sdp','')} m²."))
+            self._surfaces_kv()
             self.h3("3-1-1  Disposition")
             for item in p.get("distribution", []):
                 self.bullet(item)
@@ -682,6 +720,7 @@ class RapportExpertise:
                 f"Appartement de type {p.get('type_appart','F3')} situé "
                 f"{p.get('niveau_etage','au')} du bâtiment {p.get('batiment','')}. "
                 f"État général : {p.get('etat_general','bon')}."))
+            self._surfaces_kv()
             self.h3("3-1-1  Disposition")
             for item in p.get("distribution", []):
                 self.bullet(item)

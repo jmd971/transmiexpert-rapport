@@ -53,6 +53,24 @@ const initialData = {
   zonage_plu: '',
   assainissement: 'Collectif',
 
+  // Urbanisme & situation juridique
+  constructibilite: '',
+  dpu: 'À vérifier',
+  servitudes: '',
+  mitoyennete: '',
+  situation_occupation: 'Libre de toute occupation',
+  bail_details: '',
+  origine_nature: 'Acquisition à titre onéreux',
+  origine_date_acquisition: '',
+  origine_prix_acquisition: '',
+  origine_notaire: '',
+  origine_indice_icc: '',
+  origine_indice_icc_actuel: '',
+
+  // Surfaces complémentaires
+  surface_habitable: '',
+  surface_carrez: '',
+
   // Environnement & marché
   env_distance_centre: '',
   env_acces: '',
@@ -491,6 +509,86 @@ function StepBien({ data, set }) {
         <input value={data.zonage_plu} onChange={e => set('zonage_plu', e.target.value)}
                placeholder="Zone UB — Résidentielle périphérique (PLU …)" />
       </Field>
+      <div className="grid-2">
+        <Field label="Constructibilité résiduelle" hint="Extension / emprise au sol restante">
+          <input value={data.constructibilite} onChange={e => set('constructibilite', e.target.value)}
+                 placeholder="Extension possible — emprise résiduelle ~80 m²" />
+        </Field>
+        <Field label="Droit de préemption urbain (DPU)">
+          <select value={data.dpu} onChange={e => set('dpu', e.target.value)}>
+            <option>À vérifier</option>
+            <option>Soumis au DPU</option>
+            <option>Non soumis au DPU</option>
+          </select>
+        </Field>
+      </div>
+
+      <div className="sep" />
+      <div className="sec-title">Origine de propriété (acte)</div>
+      <Alert type="info">
+        À renseigner depuis l'acte de propriété. La date et le prix d'acquisition, avec les
+        indices ICC, alimentent automatiquement la méthode d'actualisation (maison).
+      </Alert>
+      <div className="grid-2" style={{marginTop:'.5rem'}}>
+        <Field label="Nature de l'acquisition">
+          <select value={data.origine_nature} onChange={e => set('origine_nature', e.target.value)}>
+            <option>Acquisition à titre onéreux</option>
+            <option>Donation-partage</option>
+            <option>Succession</option>
+            <option>Apport en société</option>
+            <option>Autre</option>
+          </select>
+        </Field>
+        <Field label="Date d'acquisition" hint="Telle qu'indiquée sur l'acte">
+          <input value={data.origine_date_acquisition} onChange={e => set('origine_date_acquisition', e.target.value)}
+                 placeholder="15 mars 2015" />
+        </Field>
+      </div>
+      <div className="grid-2">
+        <Field label="Prix d'acquisition (€)" hint="Net vendeur">
+          <input type="number" value={data.origine_prix_acquisition} onChange={e => set('origine_prix_acquisition', e.target.value)}
+                 placeholder="180000" />
+        </Field>
+        <Field label="Notaire / étude">
+          <input value={data.origine_notaire} onChange={e => set('origine_notaire', e.target.value)}
+                 placeholder="Me Dupont — Pointe-à-Pitre" />
+        </Field>
+      </div>
+      <div className="grid-2">
+        <Field label="Indice ICC à l'acquisition" hint="INSEE — trimestre de l'acte">
+          <input type="number" value={data.origine_indice_icc} onChange={e => set('origine_indice_icc', e.target.value)}
+                 placeholder="1671" />
+        </Field>
+        <Field label="Indice ICC actuel" hint="INSEE — dernier trimestre publié">
+          <input type="number" value={data.origine_indice_icc_actuel} onChange={e => set('origine_indice_icc_actuel', e.target.value)}
+                 placeholder="2146" />
+        </Field>
+      </div>
+
+      <div className="sep" />
+      <div className="sec-title">Servitudes, mitoyenneté & occupation</div>
+      <Field label="Servitudes" hint="Passage, vue, réseaux… (figurent sur l'acte)">
+        <textarea value={data.servitudes} onChange={e => set('servitudes', e.target.value)}
+                  placeholder="Servitude de passage au profit de la parcelle AO 143 ; canalisation enterrée…" />
+      </Field>
+      <Field label="Mitoyenneté">
+        <input value={data.mitoyennete} onChange={e => set('mitoyennete', e.target.value)}
+               placeholder="Mur mitoyen côté Est avec la parcelle AO 141" />
+      </Field>
+      <div className="grid-2">
+        <Field label="Situation d'occupation">
+          <select value={data.situation_occupation} onChange={e => set('situation_occupation', e.target.value)}>
+            <option>Libre de toute occupation</option>
+            <option>Occupé par le propriétaire</option>
+            <option>Loué — bail en cours</option>
+            <option>Occupé à titre gratuit</option>
+          </select>
+        </Field>
+        <Field label="Détail du bail (si loué)" hint="Loyer, type, échéance">
+          <input value={data.bail_details} onChange={e => set('bail_details', e.target.value)}
+                 placeholder="Bail d'habitation — 750 €/mois — échéance 06/2027" />
+        </Field>
+      </div>
 
       <div className="sep" />
       <div className="sec-title">Environnement immédiat</div>
@@ -624,6 +722,21 @@ function StepDescription({ data, set }) {
           </Field>
         )}
       </div>
+
+      {data.type_bien !== 'terrain' && (
+        <div className="grid-2" style={{marginTop:'.5rem'}}>
+          <Field label="Surface habitable (m²)" hint="Surface réelle (hors annexes)">
+            <input type="number" value={data.surface_habitable} onChange={e => set('surface_habitable', e.target.value)}
+                   placeholder="160" />
+          </Field>
+          {data.type_bien === 'appartement' && (
+            <Field label="Surface loi Carrez (m²)" hint="Obligatoire en copropriété">
+              <input type="number" value={data.surface_carrez} onChange={e => set('surface_carrez', e.target.value)}
+                     placeholder="58.5" />
+            </Field>
+          )}
+        </div>
+      )}
 
       {data.type_bien !== 'terrain' && (
         <>
